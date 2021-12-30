@@ -71,8 +71,13 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
         if(ContainsOne(messageText, new string[]{"dolar blue","blue", "dolarblue", "dolar paralelo"})){
             currency = GetDolarHoyValues();
         }
-        
+
+        // Send message to telegram bot
         messageText = $"{currency.Name} price is: {currency.SellValue}";
+        Message sentMessage = await botClient.SendTextMessageAsync(
+        chatId: chatId,
+        text: messageText,
+        cancellationToken: cancellationToken);
     }
     else if(messageText.Contains("password")){
         
