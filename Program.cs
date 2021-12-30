@@ -1,7 +1,7 @@
 ﻿using Microsoft.Extensions.Configuration;
 using HtmlAgilityPack;
 using ScrapySharp.Network;
-
+using QRCoder;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Extensions.Polling;
@@ -14,7 +14,7 @@ var botClient = config.GetSection("TelegramBotClient");
 
 if (botClient == null)
 {
-    Console.WriteLine("No se encontro el bot client id en la configuracion");
+    Console.WriteLine("No se encontro el BotClientId en la configuracion");
     return;
 }
 var bot = new TelegramBotClient(botClient.Value);
@@ -74,15 +74,34 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
         
         messageText = $"{currency.Name} price is: {currency.SellValue}";
     }
-    else{
+    else if(messageText.Contains("password")){
+        
+        if (messageText.Contains("new")){
+            NewPassword(messageText, messageText);
+
+            messageText = $"{messageText} guardado correctamente";
+            Message sentMessage = await botClient.SendTextMessageAsync(
+            chatId: chatId,
+            text: messageText,
+            cancellationToken: cancellationToken);
+        }
+        else{
+            // get password from database.
+            var password = GetPassword(messageText);
+            await GenerateQR(bot,chatId, password);
+        }
+    }
+    else 
+    {
         // Echo received message text
         messageText = $"You said: {messageText}";
-    }
-
-    Message sentMessage = await botClient.SendTextMessageAsync(
+        Message sentMessage = await botClient.SendTextMessageAsync(
         chatId: chatId,
         text: messageText,
         cancellationToken: cancellationToken);
+    }
+
+
 }
 
 Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
@@ -103,6 +122,7 @@ Boolean ContainsOne(string message, string[] words)
     return (message.Split(" ").Any(x=>words.Contains(x)));
 }
 
+// Binance pair values
 Currency GetPairFromBinance(string pair, string currencyName)
 {
     var currency = new Currency();
@@ -123,6 +143,7 @@ Currency GetPairFromBinance(string pair, string currencyName)
     return currency;
 }
 
+// Get Dolar blue values from dolarhoy.com
 Currency GetDolarHoyValues()
 {
     var url = "https://www.dolarhoy.com/";
@@ -142,6 +163,7 @@ Currency GetDolarHoyValues()
     return dolarObj;
 }
 
+// Get entire html from website for scrapping
 static HtmlNode GetHtml(string url)
 {
     ScrapingBrowser scraping = new ScrapingBrowser();
@@ -149,6 +171,7 @@ static HtmlNode GetHtml(string url)
     return webpage.Html;
 }
 
+// Get configuration from appsettings.json
 static IConfiguration LoadConfiguration()
 {
     var builder = new ConfigurationBuilder()
@@ -157,3 +180,50 @@ static IConfiguration LoadConfiguration()
     return builder.Build();
 }
 
+// Print QR Code on telegram bot
+static async Task GenerateQR(TelegramBotClient bot, long chatId, string text) {  
+    QRCodeGenerator qrGenerator = new QRCodeGenerator();
+    QRCodeData qrCodeData = qrGenerator.CreateQrCode(text, QRCodeGenerator.ECCLevel.Q);
+    PngByteQRCode qrCode = new PngByteQRCode(qrCodeData);
+    byte[] qrCodeAsPngByteArr = qrCode.GetGraphic(20);
+
+    using (MemoryStream ms = new MemoryStream(qrCodeAsPngByteArr))
+    {
+        // This is important: otherwise anything reading the stream
+        // will start at the point AFTER the written image.
+        ms.Position = 0;
+        Message message = await bot.SendPhotoAsync(
+                chatId: chatId,
+                photo: ms,
+                caption: "Escaneame"
+            );
+    }
+}  
+
+// Get password from database
+static string GetPassword(string text)
+{
+    string resultPass = string.Empty;
+    using (var db = new PasswordContext())
+    {
+        Console.WriteLine("Querying for a password");
+        var pass = db.Passwords
+            .OrderBy(b => b.Name.ToLower() == text)
+            .FirstOrDefault();
+
+        if (pass != null) resultPass = pass.Pwd;
+    }
+    return resultPass;
+}
+
+// Create a new password record on database
+static void NewPassword(string name, string pass)
+{
+    using (var db = new PasswordContext())
+    {
+        Password passObj = new Password(name, pass);
+        Console.WriteLine("Inserting a new password");
+        db.Add(passObj);
+        db.SaveChanges();
+    }
+}
